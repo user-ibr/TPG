@@ -1,0 +1,214 @@
+---
+title: "TPG 6"
+author: "Ibrahim Zaidan"
+date: "2025-09-24"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+# Set Data Kopi VS Teh untuk Produktivitas
+
+```{r}
+library(MASS)
+set.seed(099)
+n_kopi <- 20
+n_teh <- 20
+
+mu_kopi <- c(60, 55)
+Sigma <- matrix(c(200, 50, 50, 180), 2) 
+data_kopi <- mvrnorm(n_kopi, mu = mu_kopi, Sigma = Sigma)
+
+mu_teh <- c(65, 60)
+data_teh <- mvrnorm(n_teh, mu = mu_teh, Sigma = Sigma)
+
+data_minuman <- data.frame(
+  Kelompok = rep(c("Kopi", "Teh"), each = 20),
+  Fokus = c(data_kopi[,1], data_teh[,1]),
+  Kecepatan = c(data_kopi[,2], data_teh[,2])
+)
+data_minuman
+```
+
+```{r}
+group_kopi <- subset(data_minuman, Kelompok == "Kopi", select = c(Fokus, Kecepatan))
+group_kopi
+group_teh <- subset(data_minuman, Kelompok == "Teh", select = c(Fokus, Kecepatan))
+group_teh
+```
+
+# Perbandingan Dua Vektor Nilai Tengah Sampel Berpasangan
+
+```{r}
+
+X = data.frame(group_kopi, group_teh)
+```
+
+Menghitung vektor rataan dan matriks covarians
+
+```{r}
+xbar = apply(X, 2, mean)
+xbar
+cov_m = cov(X)
+cov_m
+```
+
+## Uji T2 Hotelling Dua Populasi Sampel Berpasangan
+
+```{r}
+library(MVTests)
+mean0 <- colMeans(X)   # rata-rata tiap kolom
+result <- OneSampleHT2(X, mu0 = mean0, alpha = 0.05)
+summary(result)
+```
+Nilai Hotelling T² = 0 dan p-value = 1 menunjukkan tidak ada perbedaan signifikan antara skor Fokus dan Kecepatan peserta kopi vs teh dalam sampel berpasangan.
+
+## Selang Kepercayaan Simultan
+
+```{r}
+result$CI
+```
+
+```{r}
+bon = function(mu,S,n,alpha,k){
+ p = length(mu)
+ lower = mu[k] - sqrt(S[k,k]/n) * abs(qt(alpha/(2*p), df=n-1))
+ upper = mu[k] + sqrt(S[k,k]/n) * abs(qt(alpha/(2*p), df=n-1))
+ c(lower = lower,upper = upper)
+}
+
+n = nrow(X)
+
+# Fokus
+bon(xbar, cov_m,n,0.05,1)
+# Kecepatan
+bon(xbar, cov_m,n,0.05,2)
+```
+Interval kepercayaan simultan menunjukkan bahwa rata-rata Fokus peserta kopi vs teh berada di kisaran 56,46 – 72,60, dan Kecepatan berada di kisaran 48,81 – 67,37, sehingga secara umum kedua kelompok tidak berbeda ekstrem dan rata-rata masih berada dalam rentang yang cukup tumpang tindih.
+
+# Perbandingan Dua Vektor Nilai Tengah Sampel Saling Bebas Ragam Sama
+
+```{r}
+xbar1 = apply(group_kopi, 2, mean)
+xbar1
+xbar2 = apply(group_teh, 2, mean)
+xbar2
+cov_m1 = cov(group_kopi)
+cov_m1
+cov_m2 = cov(group_teh)
+cov_m2
+
+n1 = nrow(group_kopi)
+n2 = nrow(group_teh)
+
+s_gab = ((n1-1)*cov_m1+(n2-1)*cov_m2)/(n1+n2-2)
+s_gab
+```
+
+## Uji T2 Hotelling Dua Populasi Sampel Saling Bebas Ragam Sama
+
+```{r}
+library(Hotelling)
+
+t2_homogen = hotelling.test(group_kopi, group_teh, var.equal=TRUE)
+t2_homogen
+```
+Test stat = 3,93 dengan p-value ≈ 0,16 menunjukkan bahwa rata-rata Fokus dan Kecepatan antara peminum kopi dan teh tidak berbeda secara signifikan ketika diasumsikan ragam sama.
+
+## Selang Kepercayaan Simultan
+
+```{r}
+T.ci = function(mu1, mu2, S_gab, n1, n2, avec=rep(1,length(mu)), level=0.95){
+p = length(mu1)
+mu = mu1-mu2
+cval = qf(level, p, n1+n2-p-1) * p * (n1+n2-2) / (n1+n2-p-1)
+zhat = crossprod(avec, mu)
+zvar = crossprod(avec, S_gab %*% avec)* (1/n1+1/n2)
+const = sqrt(cval * zvar)
+c(lower = zhat - const, upper = zhat + const)
+}
+
+# Fokus
+T.ci(xbar1, xbar2, s_gab, n1,n2, avec=c(1,0),level=0.95)
+
+# Kecepatan
+T.ci(xbar1, xbar2, s_gab, n1,n2, avec=c(0,1),level=0.95)
+
+```
+Selang Simultan Fokus: [-15,90, 3,60] → interval mencakup 0, menegaskan tidak ada perbedaan signifikan Fokus secara simultan.
+
+Selang Simultan Kecepatan: [-18,27, 3,47] → interval mencakup 0, menegaskan tidak ada perbedaan signifikan Kecepatan secara simultan.
+Selang Kepercayaan Bonferroni
+
+```{r}
+bon = function(mu1, mu2 ,S, n1, n2, alpha, k){
+ p = length(mu1)
+ mu = mu1-mu2
+ lower = mu[k] - sqrt((S[k,k]) *(1/n1+1/n2))* abs(qt(alpha/(2*p), df=n1+n2-2))
+ upper = mu[k] + sqrt((S[k,k]) *(1/n1+1/n2))* abs(qt(alpha/(2*p), df=n1+n2-2))
+ ci = c(lower = lower,upper = upper)
+ names(ci)= c("lower","upper")
+ ci
+}
+
+# Fokus
+bon(xbar1, xbar2, s_gab, n1, n2,0.05,1)
+
+# Kecepatan
+bon(xbar1, xbar2, s_gab, n1, n2,0.05,2)
+
+```
+Selang Bonferroni Fokus: [-14,95, 2,66] → interval mencakup 0, berarti tidak ada bukti signifikan bahwa kopi dan teh berbeda dalam Fokus.
+
+Selang Bonferroni Kecepatan: [-17,21, 2,42] → interval mencakup 0, berarti tidak ada bukti signifikan perbedaan Kecepatan.
+
+# Perbandingan Dua Vektor Nilai Tengah Sampel Saling Bebas Ragam Tidak Sama
+
+## Menghitung vektor rataan dan matriks covarians
+
+```{r}
+xbar1 = apply(group_kopi, 2, mean)
+xbar1
+xbar2 = apply(group_teh, 2, mean)
+xbar2
+cov_m1 = cov(group_kopi)
+cov_m1
+cov_m2 = cov(group_teh)
+cov_m2
+
+n1 = nrow(group_kopi)
+n2 = nrow(group_teh)
+```
+
+
+## Uji T2 Hotelling Dua Populasi Sampel Saling Bebas Ragam Sama
+
+```{r}
+t2_not_homogen = hotelling.test(group_kopi, group_teh, var.equal=FALSE)
+t2_not_homogen
+```
+Test stat sama (3,93) dengan p-value ≈ 0,16 juga menegaskan bahwa tidak terdapat perbedaan signifikan antara kopi dan teh untuk Fokus dan Kecepatan, bahkan saat ragam tidak sama.
+
+## Selang Kepercayaan Simultan
+
+```{r}
+T.ci = function(mu1, mu2, S1, S2, n1, n2, avec=rep(1,length(mu)), level=0.95){
+p = length(mu1)
+mu = mu1-mu2
+cval = qchisq(level, p)
+zhat = crossprod(avec, mu)
+zvar = crossprod(avec, S1 %*% avec)/n1 + crossprod(avec, S2 %*% avec)/n2
+const = sqrt(cval * zvar)
+c(lower = zhat - const, upper = zhat + const)
+}
+
+# Fokus
+T.ci(xbar1, xbar2, cov_m1, cov_m2, n1,n2, avec=c(1,0),level=0.95)
+
+# Kecepatan
+T.ci(xbar1, xbar2, cov_m1, cov_m2, n1,n2, avec=c(0,1),level=0.95)
+```
+Fokus: [-15,39, 3,09] dan Kecepatan: [-17,69, 2,90] → keduanya mencakup 0, menunjukkan tidak ada bukti signifikan bahwa perbedaan rata-rata antara kopi dan teh berbeda karena ragam yang tidak sama.
