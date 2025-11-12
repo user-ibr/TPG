@@ -1,0 +1,223 @@
+---
+title: "Tugas TPG Clustering"
+author: "Ibrahim Zaidan"
+date: "2025-11-12"
+output: 
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    code_folding: show
+    highlight: tango
+    df_print: paged
+---
+
+<style>
+body {
+  font-family: 'Poppins', sans-serif;
+  background-color: #f8f9fa;
+}
+h1, h2, h3 {
+  color: #2c3e50;
+  font-weight: 600;
+}
+.table {
+  border-radius: 10px;
+  overflow: hidden;
+}
+pre {
+  background-color: #eef2f7;
+  border-left: 5px solid #007bff;
+  padding: 10px;
+}
+</style>
+
+# 1. Persipan data dan library
+
+```{r install-packages, include=FALSE}
+packages <- c("tidyverse", "cluster", "factoextra", "ggplot2", "plotly", "DT", "leaflet", "clusterCrit", "dplyr", "maps", "scales", "RColorBrewer")
+
+installed <- packages %in% installed.packages()
+if (any(!installed)) {
+  install.packages(packages[!installed], dependencies = TRUE)
+}
+
+lapply(packages, library, character.only = TRUE)
+```
+
+# 2. Ambil data world.cities
+
+```{r load-data}
+data("world.cities", package = "maps")
+set.seed(42)
+
+cities <- world.cities %>%
+  sample_n(300) %>%
+  rename(lat = lat, long = long, pop = pop, name = name, country.etc = country.etc) %>%
+  select(name, country.etc, lat, long, pop)
+
+cities <- cities %>% filter(!is.na(pop) & pop > 0)
+
+if(nrow(cities) < 200) {
+  cities <- world.cities %>%
+    filter(!is.na(pop) & pop > 0) %>%
+    sample_n(300)
+}
+
+cities <- cities %>% mutate(logpop = log(pop + 1))
+cities_scaled <- cities %>% select(lat, long, logpop) %>% scale()
+
+knitr::kable(head(cities, 10))
+```
+
+Ringkasan dari 300 kota yang diambil dari data world.cities bawaan R
+
+# 3. Menentukan jumlah cluster optimal
+
+```{r}
+p1 <- fviz_nbclust(cities_scaled, kmeans, method = "wss") + labs(title = "Elbow Method - world.cities (sample)")
+
+p2 <- fviz_nbclust(cities_scaled, kmeans, method = "silhouette") + labs(title = "Silhouette Method - world.cities (sample)")
+
+subplot(ggplotly(p1), ggplotly(p2), nrows = 1, shareX = FALSE)
+
+k_opt <- 3
+cat('Pilihan k_opt =', k_opt, '\n')
+```
+
+Grafik menunjukkan metode Elbow maupun Silhouette sama-sama menyarankan k = 3 cluster optimal.
+
+Metode clustering yang digunakan bersifat non-hierarkis (seperti K-Means), karena pembentukan kelompok dilakukan berdasarkan jumlah cluster (k) yang telah ditentukan sebelumnya, tanpa struktur bertingkat seperti pada metode hierarkis.
+
+# 4. K-means clustering
+
+```{r kmeans-run}
+set.seed(123)
+kmeans_result <- kmeans(cities_scaled, centers = k_opt, nstart = 50)
+
+cities_clustered <- cities %>% mutate(cluster = factor(kmeans_result$cluster))
+
+cluster_sizes <- table(cities_clustered$cluster)
+cluster_centers <- kmeans_result$centers
+
+cat('Ukuran tiap cluster:\n')
+print(cluster_sizes)
+
+knitr::kable(head(select(cities_clustered, name, country.etc, pop, cluster), 12))
+```
+
+Tabel menunjukkan terbaginya kota menjadi 3 cluster berdasarkan populasi
+
+Cluster 1: Kota kecil — populasi relatif rendah (ribu–belasan ribu).
+
+Cluster 2: Kota menengah — puluhan hingga seratus ribu penduduk.
+
+Cluster 3: Kota besar — populasi ratusan ribu ke atas.
+
+164 kota di cluster 1
+
+66 kota di cluster 2
+
+70 kota di cluster 3
+
+# 5. Visualisasi
+
+## Visualisasi clustering - Scatter (interaktif) + ggplot
+
+```{r}
+p_scatter <- ggplot(cities_clustered, aes(x = long, y = lat, color = cluster, text = paste(name, country.etc, '<br>Pop:', pop))) +
+  borders('world', colour = 'gray70', fill = 'gray95') +
+  geom_point(aes(size = log(pop)), alpha = 0.8) +
+  scale_color_brewer(palette = 'Set1') +
+  labs(title = 'Peta Persebaran Kota Berdasarkan Cluster', x = 'Longitude', y = 'Latitude', color = 'Cluster', size = 'log(pop)') +
+  coord_fixed(1.3) +
+  theme_minimal()
+
+ggplotly(p_scatter, tooltip = 'text')
+```
+
+Visualisasi menunjukkan bahwa hasil clustering ini memiliki validitas spasial — kota dalam cluster yang sama cenderung berdekatan di peta dunia.
+
+## Visualisasi interaktif dengan leaflet
+
+```{r leaflet-map}
+pal <- colorFactor(palette = "Set1", domain = cities_clustered$cluster)
+
+leaflet(cities_clustered) %>%
+  addProviderTiles('CartoDB.Positron') %>%
+  addCircleMarkers(~long, ~lat,
+                   color = ~pal(cluster),
+                   radius = ~scales::rescale(log(pop), to = c(3,10)),
+                   stroke = FALSE, fillOpacity = 0.7,
+                   label = ~paste0(name, ', ', country.etc, ' (Pop: ', format(pop, big.mark = ','), ')'),
+                   popup = ~paste0('<b>', name, '</b><br>', country.etc, '<br>Pop: ', format(pop, big.mark = ','), '<br>Cluster: ', cluster)) %>%
+  addLegend('bottomright', pal = pal, values = ~cluster, title = 'Cluster')
+```
+
+Visualisasi yang lebih interaktif
+
+# 6. Evaluasi clustering
+
+```{r}
+dist_euc <- dist(cities_scaled, method = "euclidean")
+
+sil <- silhouette(kmeans_result$cluster, dist_euc)
+sil_avg <- mean(sil[, 3])
+
+cities_mat <- as.matrix(cities_scaled)
+
+int_res <- intCriteria(cities_mat, as.integer(kmeans_result$cluster),
+                       c("Calinski_Harabasz", "Dunn", "Davies_Bouldin"))
+
+CH_index <- ifelse(!is.null(int_res$calinski_harabasz), int_res$calinski_harabasz, NA)
+Dunn_index <- ifelse(!is.null(int_res$dunn), int_res$dunn, NA)
+DB_index <- ifelse(!is.null(int_res$davies_bouldin), int_res$davies_bouldin, NA)
+
+hasil_evaluasi <- data.frame(
+  Silhouette_Avg = sil_avg,
+  Calinski_Harabasz = CH_index,
+  Dunn = Dunn_index,
+  Davies_Bouldin = DB_index
+)
+
+hasil_evaluasi
+```
+
+Silhouette dan DBI menunjukkan clustering cukup baik, walau sebagian kota di perbatasan (populasi menengah) masih sedikit tumpang tindih antar cluster, ditunjukkan oleh nilai CH dan nilai Dunn.
+
+# 7. Ringkasan dan penjelasan singkat
+
+```{r}
+summary_tbl <- cities_clustered %>%
+  group_by(cluster) %>%
+  summarise(
+    Rata_Populasi = round(mean(pop)),
+    Max_Populasi = max(pop),
+    Jumlah_Kota = n()
+  ) %>%
+  arrange(cluster)
+
+knitr::kable(summary_tbl)
+```
+
+Interpretasi singkat:
+
+- Cluster 1: Kota kecil — populasi relatif rendah (ribu–belasan ribu).
+
+- Cluster 2: Kota menengah — puluhan hingga seratus ribu penduduk.
+
+- Cluster 3: Kota besar — populasi ratusan ribu ke atas.
+
+Evaluasi Clustering:
+
+- Metode clustering bersifat **non-hierarkis** karena k sudah ditentukan di awal (k=3)
+
+- Nilai Silhouette rata-rata = 0.39 menunjukkan kualitas cluster **cukup baik**
+
+- Indeks Calinski–Harabasz = 149.6 menunjukkan **konsistensi internal yang kuat**, artinya variasi antar cluster lebih besar dibanding variasi dalam cluster.
+
+- Indeks Dunn = 0.0489 relatif kecil, menandakan **jarak antar cluster masih bisa diperlebar**.
+
+- Indeks Davies–Bouldin = 1.01 termasuk **baik** (mendekati 0), menunjukkan cluster yang cukup terpisah.
+
+Kesimpulan: Struktur cluster sudah cukup optimal, namun masih dapat ditingkatkan dengan menyesuaikan jumlah cluster (k) atau metode normalisasi data.
