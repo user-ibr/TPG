@@ -1,0 +1,120 @@
+---
+title: "Tugas TPG Diskriminan"
+author: "Ibrahim Zaidan"
+date: "2025-11-17"
+output: 
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    code_folding: show
+    highlight: tango
+    df_print: paged
+---
+```{r setup, include=TRUE}
+packages <- c("readxl", "MASS")
+
+for (p in packages) {
+  if (!require(p, character.only = TRUE)) {
+    install.packages(p, dependencies = TRUE)
+  }
+  library(p, character.only = TRUE)
+}
+```
+# Import Data
+
+```{r}
+data <- readxl::read_excel("C:/Users/De Ibrahim/kuliah/sem 5/TPG/Kuliah/Data Diskriminan contoh.xlsx")
+```
+
+# Pisah data berdasarkan klasifikasi
+
+```{r}
+bad <- subset(data, Status == "Bad")[, 1:3]
+good <- subset(data, Status == "Good")[, 1:3]
+```
+
+# Hitung Rata2 tiap klasifikasi
+
+## Bad
+
+```{r}
+mean_bad <- colMeans(bad)
+mean_bad
+```
+
+## Good
+
+```{r}
+mean_good <- colMeans(good)
+mean_good
+```
+
+# Matriks Kovarians
+
+## Bad
+```{r}
+cov_bad <- cov(bad)
+cov_bad
+```
+
+## Good
+
+```{r}
+cov_good <- cov(good)
+cov_good
+```
+
+# Matriks Kovarian Gabungan Antar Kelas
+
+```{r}
+n_bad <- nrow(bad)
+n_good <- nrow(good)
+
+Sp <- ((n_bad - 1) * cov_bad + (n_good - 1) * cov_good) / (n_bad + n_good - 2)
+Sp
+```
+
+# Kebalikan Matriks Kovarian Gabungan		
+
+```{r}
+Sp_inv <- solve(Sp)
+Sp_inv
+```
+
+# weight factor
+
+```{r}
+mean_diff <- (mean_bad - mean_good)
+a <- Sp_inv %*% mean_diff
+
+a
+```
+
+# Cutoff point
+
+```{r}
+h <- 0.5 * t(a) %*% (mean_bad + mean_good)
+h
+```
+
+# Skor tiap Observasi
+
+```{r}
+scores_manual <- as.matrix(data[,1:3]) %*% a
+
+head(scores_manual)
+```
+
+# Prediktor Klasifikasi
+
+```{r}
+h <- as.numeric(0.5 * t(a) %*% (mean_bad + mean_good))
+scores_manual <- as.numeric(as.matrix(data[,1:3]) %*% a)
+pred_manual <- ifelse(scores_manual >= h, "Bad", "Good")
+table(Prediksi = pred_manual, Aktual = data$Status)
+```
+
+# Kesimpulan
+
+Hasil sudah sama persis dengan yang di excel (yang dikerjakan manual menggunakan rumus excel)
