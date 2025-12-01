@@ -1,0 +1,289 @@
+---
+title: "Tugas UAS mandiri"
+author: "Ibrahim Zaidan"
+date: "2025-11-21"
+output: 
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    code_folding: show
+    highlight: tango
+    df_print: paged
+---
+
+# Import Data
+
+```{r}
+packages <- c(
+  "tidyverse", "readxl", "janitor", "lubridate",
+  "stringr", "data.table", "skimr"
+)
+
+installed <- rownames(installed.packages())
+to_install <- packages[!packages %in% installed]
+if(length(to_install) > 0){
+  install.packages(to_install)
+}
+
+lapply(packages, library, character.only = TRUE)
+```
+```{r}
+path_data <- "C:/Users/De Ibrahim/kuliah/sem 5/TPG/Kuliah/Data Proyek Mandiri.xlsx"
+data_mentah <- read_excel(path_data)
+head(data_mentah)
+```
+
+# Preprocessing I
+
+Memperbaiki format data yang tidak rapih dan mempersulit analisis kedepannya.
+
+## Pembersihan Kolom dan Tipe Data
+
+```{r}
+data <- data_mentah %>%
+clean_names() %>%
+  rename(
+    Kabupaten_Kota = kab_kot,
+    Tahun = tahun,
+    Bulan = bulan,
+    Produk = produk,
+    Harga = harga,
+    Kategori = kategori,
+    Kode_BPS = kode_bps,
+    Kode_Provinsi = kode_prov,
+    Nama_Provinsi = nama_prov
+) %>%
+  mutate(
+    across(c(Kabupaten_Kota, Bulan, Produk, Kategori, Nama_Provinsi),
+           str_squish),
+    Harga = as.numeric(str_replace_all(Harga, "[^0-9]", "")),
+    Kode_BPS = as.character(Kode_BPS),
+    Kode_Provinsi = as.character(Kode_Provinsi)
+)
+```
+
+Data sudah rapi, nama kolom distandarisasi, tipe data disesuaikan, dan harga diubah menjadi numerik.
+
+## Bulan mapping
+
+```{r}
+bulan_mapping <- c(
+"Januari"="01","Februari"="02","Maret"="03","April"="04",
+"Mei"="05","Juni"="06","Juli"="07","Agustus"="08",
+"September"="09","Oktober"="10","November"="11","Desember"="12"
+)
+data <- data %>%
+  mutate(
+    bulan_num = bulan_mapping[Bulan],
+    Tanggal = ymd(paste0(Tahun, "-", bulan_num, "-01"))
+)
+head(data)
+```
+
+Menambahkan kolom bulan numerik dan membuat kolom Tanggal dalam format Date untuk analisis time series.
+
+## Imputasi linear interpolation
+
+```{r}
+data <- data %>%
+  group_by(Kabupaten_Kota, Produk) %>%
+  arrange(Tanggal) %>%
+  mutate(
+    Harga_Imputed = zoo::na.approx(Harga, na.rm = FALSE),
+    Harga_Imputed = zoo::na.locf(Harga_Imputed, na.rm = FALSE),
+    Harga_Imputed = zoo::na.locf(Harga_Imputed, fromLast = TRUE, na.rm = FALSE)
+) %>% 
+ungroup()
+```
+
+Mengisi data NA menggunakan rata-rata harga dalam kelompok kabupaten × produk sesuai dengan arahan yang pernah diberikan bu Ari.
+
+# Preprocessing II
+
+Memperbaiki dan mempersiapkan format data yang ingin dipakai berdasarkan topik yang dipilih.
+
+## Filter Produk
+
+```{r}
+gula <- data %>%
+  filter(Produk == "Gula Konsumsi") %>%
+  select(Kabupaten_Kota, Tanggal, Harga_Imputed)
+gula
+```
+
+Menyaring hanya data gula konsumsi dan menyimpan kolom kabupaten, tanggal, dan harga terimputasi
+
+## Pivot untuk time-series clustering
+
+```{r}
+gula_ts <- gula %>%
+  pivot_wider(
+    names_from = Kabupaten_Kota,
+    values_from = Harga_Imputed
+) %>%
+  arrange(Tanggal)
+gula_ts
+```
+
+Mengubah data dari format panjang (long) menjadi format lebar (wide) sehingga setiap Kabupaten/Kota menjadi kolom berisi harga gula per tanggal.
+
+## Matrix awal
+
+```{r}
+ts_mat <- gula_ts %>% select(-Tanggal) %>% as.matrix()
+```
+
+Mengubah data gula menjadi matriks agar data dapat diproses oleh algoritma K-Means yang membutuhkan input berupa matriks numerik.
+
+# Atasi kolom bermasalah
+
+## Hapus kolom NA
+
+```{r}
+ts_mat <- ts_mat[, colSums(is.na(ts_mat)) < nrow(ts_mat)]
+```
+
+Hapus kolom berisi NA yang terdeteksi
+
+## Interpolasi forward/backward
+```{r}
+ts_mat <- apply(ts_mat, 2, function(x){
+  x <- zoo::na.approx(x, na.rm = FALSE)
+  x <- zoo::na.locf(x, na.rm = FALSE)
+  x <- zoo::na.locf(x, fromLast = TRUE, na.rm = FALSE)
+  return(x)
+})
+```
+
+Melakukan Interpolasi untuk kolom yang masih ada sisa NA
+
+## Hapus NA sisa
+```{r}
+ts_mat <- ts_mat[, colSums(is.na(ts_mat)) == 0]
+```
+
+Hapus kolom yang masih mengandung NA setelah semua metode
+
+## Hapus kolom dengan sd = 0
+
+```{r}
+sd_col <- apply(ts_mat, 2, sd)
+ts_mat <- ts_mat[, sd_col > 0]
+```
+
+variabel konstan bikin NaN saat scale
+
+# Clustering
+
+## Transpose matriks
+
+```{r}
+ts_mat_t <- t(ts_mat)
+```
+
+Mentranspose matriks sehingga baris menjadi daerah dan kolom menjadi waktu.
+
+## scale data
+
+```{r}
+ts_scaled <- scale(ts_mat_t)
+```
+
+Menskalakan data untuk persiapan clustering.
+
+## Menentukan jumlah cluster
+
+```{r}
+library(factoextra)
+fviz_nbclust(ts_scaled, kmeans, method="wss")
+fviz_nbclust(ts_scaled, kmeans, method="silhouette")
+```
+
+Grafik menunjukkan k=2 sebagai jumlah cluster optimal.
+
+## K-Means
+
+```{r}
+set.seed(1401231099) # karena NIM saya G1401231099
+k_res <- kmeans(ts_scaled, centers = 2, nstart = 25)
+table(k_res$cluster)
+```
+
+Terdapat 498 daerah di cluster 1 dan 6 daerah di cluster 2.
+
+```{r}
+library(factoextra)
+fviz_cluster(k_res, data = ts_scaled,
+             main = "Visualisasi Cluster Harga Gula Pasir (K = 2)")
+```
+
+cluster 1 wilayah-wilayah dengan harga gula cenderung stabil.
+
+cluster 2 wilayah-wilayah dengan harga gula tinggi (ekstrem).
+
+# Analisis statistik
+
+## daftar anggota tiap cluster
+
+```{r}
+cluster_member <- data.frame(
+  Daerah = rownames(ts_scaled),
+  Cluster = k_res$cluster
+)
+cluster_member
+cluster_member %>% 
+  filter(Cluster == 2)
+```
+
+Membuat tabel yang mencocokkan setiap daerah dengan cluster hasil K-Means agar kita tahu daerah mana masuk pola harga yang mana.
+
+## rata-rata level harga tiap cluster
+
+```{r}
+clusters <- k_res$cluster
+cluster_mean_level <- data.frame(
+  Daerah = colnames(ts_mat),
+  Cluster = clusters
+) %>%
+  left_join(
+    data.frame(
+      Daerah = colnames(ts_mat),
+      RataRataHarga = colMeans(ts_mat)
+    ),
+    by = "Daerah"
+  ) %>%
+  group_by(Cluster) %>%
+  summarise(Mean_Level = mean(RataRataHarga))
+cluster_mean_level
+```
+
+Walaupun cluster 1 sebanyak 498 daerah, rata-rata harganya masih jauh lebih rendah dari cluster 2.
+
+## variabilitas harga tiap cluster
+
+```{r}
+cluster_volatility <- data.frame(
+  Daerah = colnames(ts_mat),
+  Cluster = clusters
+) %>%
+  left_join(
+    data.frame(t(apply(ts_mat, 2, sd)), check.names = FALSE) %>%
+      pivot_longer(everything(), names_to="Daerah", values_to="Volatility"),
+    by="Daerah"
+  ) %>%
+  group_by(Cluster) %>%
+  summarise(Volatility_Avg = mean(Volatility))
+cluster_volatility
+```
+
+Cluster 2 tidak hanya tinggi di harga, tetapi juga tinggi di volatilitas.
+
+# Kesimpulan
+
+Hasil klasterisasi menunjukkan bahwa kabupaten/kota di Indonesia terbagi menjadi 2 kelompok harga gula: cluster 1 berisi 498 daerah, sedangkan Cluster 2 berisi hanya 6 daerah (Kabupaten Puncak Jaya, Kabupaten Intan Jaya, kabupaten Yahukimo, Kabupaten Puncak, Kabupaten Nduka). 
+
+Walaupun sedikit, cluster 2 memiliki rataan harga 232% lebih tinggi dibanding rataan cluster 1 dan rataan volatilitasnya lebih tinggi 177% dibanding cluster 1, menjadikan cluster 2 menjadi variabel ekstrem dalam pergerakan harga gula.
+
+Setelah saya cari tau, ternyata 6 daerah tersebut semuanya terletak di Pegunungan Tengah Papua, di mana tempatnya sangat terisolasi, topografinya pegunungan/lembah, dan bahkan arus barang masuk melalui angkutan udara. kabupaten-kabupaten ini sangat sulit dijangkau, sehingga distribusi barang (termasuk gula) ke sana sangat mahal dan rumit.
+
