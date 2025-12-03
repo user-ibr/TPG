@@ -1,0 +1,174 @@
+---
+title: "Analisis Rancangan Percobaan Germination"
+author: "Ibrahim Zaidan"
+date: "2025-12-03"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup}
+ensure_pkg <- function(pkg){
+  if(!require(pkg, character.only = TRUE)){
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+}
+pkgs <- c("tidyverse", "car", "ggplot2", "dplyr", "performance", 
+          "ggpubr", "DescTools")
+lapply(pkgs, ensure_pkg)
+```
+
+# Persiapan Data
+
+## Import Data
+```{r}
+data_path <- "C:/Users/De Ibrahim/kuliah/sem 5/Kuliah/germination.data.csv"
+df <- read.csv(data_path)
+```
+
+Terdapat 1440 amatan dan 5 peubah.
+
+## Cek missing values
+
+```{r}
+colSums(is.na(df))
+```
+
+Tidak ada missing values
+
+## Buat proporsi germination
+
+```{r}
+df <- df %>%
+mutate(Prop = Germinated / Total_Seeds,
+Species = as.factor(Species),
+Microbe = as.factor(Microbe))
+df %>%
+group_by(Species, Microbe) %>%
+summarise(mean_prop = mean(Prop), sd_prop = sd(Prop),
+n = n(), .groups="drop") %>%
+head()
+```
+
+Kita coba hanya pakai 2 peubah, yaitu ukuran (Microbe) dan Spesiesnya (Species)
+
+# Eksplorasi Data
+
+```{r}
+ggplot(df, aes(x = Species, y = Prop, fill = Microbe)) +
+geom_boxplot() +
+theme_bw() +
+theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+ylab("Proporsi Germinated")
+```
+
+Secara visual, interaksi Species × Microbe kemungkinan signifikan, tetapi ada kemungkinan melanggar asumsi homogenitas varians.
+
+## Histogra distribusi data
+
+```{r}
+ggplot(df, aes(Prop)) +
+geom_histogram(bins = 30, color="black") +
+theme_bw() +
+ggtitle("Distribusi Proporsi Germination")
+```
+
+Data tidak normal, ada spike yang besar di 1, perlu transformasi arcsine.
+
+## Transformasi arcsine square-root
+
+```{r}
+df <- df %>%
+mutate(Prop_asin = asin(sqrt(Prop)))
+ggplot(df, aes(Prop_asin)) +
+geom_histogram(bins = 30, color="black") +
+theme_bw() +
+ggtitle("Distribusi Proporsi (Transformasi Arcsine √Prop)")
+```
+
+Setelah ditransformasi, setiap baris yang punya Prop = 1 ditumpuk di nilai 1.57, artinya transformasi berhasil.
+
+# ANOVA dua arah
+
+```{r}
+anova_asin <- aov(Prop_asin ~ Species * Microbe, data = df)
+summary(anova_asin)
+```
+
+p value species kurang dari 0.05 menunjukkan Species memberikan pengaruh yang sangat kuat dan dominan terhadap proporsi perkecambahan yang sudah ditransformasi.
+
+untuk Microbe, p valuenya juga kurang dari 0.05 menunjukkan bahwa microbe berpengaruh signifikan terhadap proporsi perkecambahan.
+
+Untuk interaksi Species × Microb juga menunjukkan p value kurang dari 0.05, artinya terdapat interaksi yang signifikan, artinya efek mikroba berubah-ubah tergantung spesiesnya.
+
+# Effect-size ANOVA
+
+```{r}
+library(effectsize)
+library(DescTools)
+eta_squared(anova_asin)
+```
+
+ini untuk hasil yang mempertimbangkan ukuran data, terlihat dari hasil ini bahwa spesies menjelaskan 68% variasi perkecambahan,Pengaruh mikroba secara langsung hampir tidak ada, dan Interaksi ada, tetapi kecil.
+
+# Uji Asumsi
+
+## Shapiro–Wilk
+
+```{r}
+resid_asin <- residuals(anova_asin)
+shapiro.test(resid_asin)
+```
+
+Walaupun berhasil ditransformasi menggunakan arscine, residual masih belom normal, tapi kasus ini umum untuk data proporsi besar dan ANOVA masih robust karena ukuran sampel sangat besar.
+
+## Levene-test
+
+```{r}
+leveneTest(Prop_asin ~ Species * Microbe, data = df)
+```
+
+Varians antar grup tidak homogen.
+
+## DW-test
+
+```{r}
+library(lmtest)
+dwtest(Prop_asin ~ Species * Microbe, data = df)
+```
+
+Tidak ada autokorelasi pada residual.
+
+# Penanganan
+
+Karena residual ANOVA melanggar asumsi normalitas dan homogenitas meskipun sudah ditransformasi, dan karena Y berupa data proporsi dengan batas 0–1, maka model terbaik adalah GLM dengan link logit (binomial).
+
+## GLM Binomial
+
+```{r}
+glm_mod <- glm(cbind(Germinated, Total_Seeds - Germinated) ~ Species * Microbe,
+               family = binomial, data = df)
+summary(glm_mod)
+```
+
+Dari hasil GLM, ditunjukkan bahwa species adalah driver utama perkecambaha,Microbe S secara umum tidak berpengaruh, Interaksi Species × Microbe signifikan hanya pada beberapa spesies, dan arahnya negatif. 
+
+## Plot Interaksi
+
+```{r}
+ggplot(df, aes(Species, Prop_asin, color = Microbe, group = Microbe)) +
+  stat_summary(fun = mean, geom = "line") +
+  stat_summary(fun = mean, geom = "point") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=60, hjust=1))
+```
+
+
+Perbedaan antar spesies sangat mencolok, sehingga faktor ‘Species’ menjadi penjelas utama variasi perkecambahan.
+
+Hypericum_cumulicola konsisten menjadi spesies dengan germination paling rendah (baik S maupun L) dan Chamaecrista_fasciculata menjadi species paling tinggi.
+
+# Kesimpulan
+
+GLM menunjukkan hasil yang paling tepat untuk data proporsi dan menegaskan bahwa Species adalah faktor utama yang menentukan tingkat perkecambahan. Pengaruh Microbe sangat kecil, dan interaksi Species × Microbe hanya muncul pada sedikit spesies. Hasil ini sejalan dengan effect size ANOVA yang juga menunjukkan dominasi faktor Species. Dengan demikian, variasi perkecambahan terutama ditentukan oleh perbedaan antar spesies, bukan oleh perlakuan mikroba.
