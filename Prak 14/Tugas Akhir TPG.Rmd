@@ -1,0 +1,87 @@
+---
+title: "TPG Tugas Akhir"
+author: "Ibrahim Zaidan"
+date: "2025-12-16"
+output: 
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    code_folding: show
+    highlight: tango
+    df_print: paged
+---
+
+# Buat Data
+
+```{r}
+set.seed(123)
+
+Transport <- sample(c("Motor","Mobil","Umum","Jalan"), 120, replace = TRUE)
+Puas <- sample(c("Rendah","Sedang","Tinggi"), 120, replace = TRUE)
+
+dataCA <- table(Transport, Puas)
+dataCA
+```
+
+Distribusi tingkat kepuasan pada setiap jenis transportasi relatif merata tanpa perbedaan mencolok.
+
+# Uji Chi-Square
+
+```{r}
+chisq.test(dataCA)
+```
+
+Uji Chi-Square menunjukkan tidak terdapat hubungan signifikan antara jenis transportasi dan tingkat kepuasan mahasiswa.
+
+# Analisis Korespondensi
+
+```{r}
+library(FactoMineR)
+library(factoextra)
+
+modelCA <- CA(dataCA, graph = FALSE)
+modelCA
+```
+
+Analisis Korespondensi dilakukan meskipun hubungan antar variabel lemah untuk melihat pola kedekatan secara visual.
+
+# Eigen Value & Scree Plot
+
+```{r}
+eig <- get_eigenvalue(modelCA)
+eig
+
+fviz_screeplot(modelCA, addlabels = TRUE)
+```
+
+
+Dimensi pertama menjelaskan hampir seluruh variasi data, sedangkan dimensi kedua tidak memberikan informasi tambahan yang berarti.
+
+# Koordinat dan Kontribusi
+
+```{r}
+row <- get_ca_row(modelCA)
+row$coord
+row$contrib
+
+col <- get_ca_col(modelCA)
+col$coord
+col$contrib
+```
+
+Kategori Mobil serta kepuasan Rendah dan Tinggi memberikan kontribusi terbesar pada pembentukan dimensi utama.
+
+# Biplot
+
+```{r}
+fviz_ca_biplot(modelCA, repel = TRUE)
+``` 
+
+Biplot Analisis Korespondensi menunjukkan bahwa kategori Mobil berada relatif dekat dengan tingkat kepuasan Rendah, yang mengindikasikan kecenderungan pengguna mobil memiliki tingkat kepuasan yang lebih rendah dibanding kategori lainnya.
+
+Sebaliknya, kategori Transportasi Umum (Umum) terletak dekat dengan kepuasan Tinggi, sehingga menunjukkan adanya kecenderungan asosiasi antara penggunaan transportasi umum dan tingkat kepuasan yang lebih tinggi.
+
+Kategori Motor dan Jalan berada relatif dekat dengan pusat koordinat, yang mengindikasikan bahwa kedua jenis transportasi tersebut tidak memiliki asosiasi yang kuat dengan tingkat kepuasan tertentu.
+
+Selain itu, karena hampir seluruh variasi data dijelaskan oleh Dimensi 1, interpretasi hubungan antar kategori terutama didasarkan pada posisi horizontal, sementara Dimensi 2 memiliki peran yang sangat kecil dalam menjelaskan pola data.
