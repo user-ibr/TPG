@@ -85,3 +85,21 @@ Sebaliknya, kategori Transportasi Umum (Umum) terletak dekat dengan kepuasan Tin
 Kategori Motor dan Jalan berada relatif dekat dengan pusat koordinat, yang mengindikasikan bahwa kedua jenis transportasi tersebut tidak memiliki asosiasi yang kuat dengan tingkat kepuasan tertentu.
 
 Selain itu, karena hampir seluruh variasi data dijelaskan oleh Dimensi 1, interpretasi hubungan antar kategori terutama didasarkan pada posisi horizontal, sementara Dimensi 2 memiliki peran yang sangat kecil dalam menjelaskan pola data.
+
+# Ringkasan
+
+1. Kasus dan Data
+
+Analisis dilakukan untuk mengkaji hubungan antara jenis transportasi dan tingkat kepuasan menggunakan data kategorik yang dibangkitkan di R
+
+2. Kesesuaian Data
+
+Data memenuhi syarat Analisis Korespondensi karena terdiri dari dua variabel kategorik, yaitu Transport dan Puas, yang disusun dalam bentuk tabel kontingensi.
+
+3. Proses Analisis
+
+Analisis dilakukan sesuai modul, meliputi pembuatan tabel kontingensi, uji Chi-Square, Analisis Korespondensi (CA), dan visualisasi biplot.
+
+4. Hasil dan Interpretasi
+
+Biplot menunjukkan Mobil cenderung berasosiasi dengan kepuasan Rendah dan transportasi umum dengan kepuasan Tinggi, sementara kategori lain tidak menunjukkan pola yang kuat.
